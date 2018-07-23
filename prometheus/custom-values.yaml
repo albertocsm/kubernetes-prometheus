@@ -1,0 +1,25 @@
+global:
+  rbacEnable: false
+
+deployAlertManager: False
+
+prometheus:
+  storageSpec:
+    volumeClaimTemplate:
+      spec:
+        storageClassName: rdb
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+
+grafana:
+  auth:
+    anonymous:
+      enabled: "true"  
+  storageSpec:
+    class: rdb
+    accessMode: "ReadWriteOnce"
+    resources:
+      requests:
+        storage: 10Gi

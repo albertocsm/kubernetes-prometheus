@@ -1,0 +1,131 @@
+waltrough
+
+	helm 
+
+		setup SA and CRB for tiller
+
+			kubectl create serviceaccount --namespace kube-system tiller
+
+			kubectl create clusterrolebinding tiller-cluster-rule --clusterrole=cluster-admin --serviceaccount=kube-system:tiller
+
+			kubectl patch deploy --namespace kube-system tiller-deploy -p '{"spec":{"template":{"spec":{"serviceAccount":"tiller"}}}}' 
+
+	prometheus
+
+		links
+		
+			https://akomljen.com/get-kubernetes-cluster-metrics-with-prometheus-in-5-minutes/
+		
+		operator setup 						
+
+			# update helm
+			helm repo add coreos https://s3-eu-west-1.amazonaws.com/coreos-charts/stable/
+
+			# make sure SA can interact with CRDs
+			kubectl create clusterrolebinding monitoring-cluster-rule --clusterrole=cluster-admin --serviceaccount=monitoring:default
+
+			# deploy the thing
+			helm install \
+              --name prometheus-operator \
+              --namespace monitoring \
+              --set rbacEnable=false \
+              coreos/prometheus-operator
+
+			#remove it if needed
+			kubectl delete namespace monitoring && helm del --purge prometheus-operator
+
+			# check if CRDs were installed ok
+			kubectl get CustomResourceDefinition
+
+
+	prometheus install
+
+		links
+
+			# default value files
+			https://github.com/coreos/prometheus-operator/blob/master/helm/kube-prometheus/values.yaml
+
+
+		setup
+
+			# customize prometheus configuration
+			cat > custom-values.yaml <<EOF
+global:
+  rbacEnable: false
+
+deployAlertManager: False			
+
+prometheus:
+  storageSpec:
+    volumeClaimTemplate:
+      spec:
+        storageClassName: rdb
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+
+grafana:
+  auth:
+    anonymous:
+      enabled: "true"			  
+  storageSpec:
+    class: rdb
+    accessMode: "ReadWriteOnce"
+    resources:
+      requests:
+        storage: 10Gi
+EOF
+
+------------------
+
+		# create necessary Storage Class type
+		cat > rdb-storage-class-yaml <<EOF
+kind: StorageClass
+apiVersion: storage.k8s.io/v1beta1
+metadata:
+  name: rdb
+provisioner: kubernetes.io/gce-pd
+parameters:
+  type: pd-ssd
+EOF
+
+------------------
+
+		# actualy deploy prometheus
+		helm install \
+         --name mon \
+         --namespace monitoring \
+         -f custom-values.yaml \
+         coreos/kube-prometheus
+
+------------------
+
+		# create ServiceMonitor artifacts	
+		cat > kafka-jmx-service-monitor.yaml <<EOF
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:  
+  name: mon-kafka
+  namespace: monitoring
+  labels:
+    app: prometheus  # mandatory
+    prometheus: mon  # mandatory
+spec:  
+  endpoints:
+  - port: jmx
+    interval: 10s  
+  namespaceSelector:
+    matchNames:
+    - kafka
+  selector:
+    matchLabels:
+      app: monitor
+EOF
+------------------
+
+		# check if Service Monitor is picked up
+		kubectl -n monitoring get secret prometheus-mon-prometheus -ojson | jq -r '.data["prometheus.yaml"]' | base64 -d | grep job_name
+		(https://github.com/coreos/prometheus-operator/blob/master/Documentation/troubleshooting.md)
+
+		
